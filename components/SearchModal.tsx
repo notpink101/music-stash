@@ -35,6 +35,12 @@ export default function SearchModal({ onClose, onImported }: Props) {
   const [manualTracks, setManualTracks] = useState([{ title: '' }])
   const [manualSubmitting, setManualSubmitting] = useState(false)
 
+  // Lock body scroll while modal is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [])
+
   useEffect(() => {
     if (mode === 'spotify') inputRef.current?.focus()
   }, [mode])

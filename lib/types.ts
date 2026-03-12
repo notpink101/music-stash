@@ -19,4 +19,5 @@ export interface Track {
   track_number: number
   duration_ms: number
   rating: number | null
+  is_interlude: boolean
 }

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import TrackRow from '@/components/TrackRow'
 import type { Album, Track } from '@/lib/types'
@@ -14,7 +14,7 @@ interface Props {
 }
 
 function computeAverage(tracks: Track[]): number | null {
-  const rated = tracks.filter((t) => t.rating !== null)
+  const rated = tracks.filter((t) => t.rating !== null && !t.is_interlude)
   if (!rated.length) return null
   return rated.reduce((sum, t) => sum + t.rating!, 0) / rated.length
 }
@@ -24,10 +24,12 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
   const [tracks, setTracks] = useState(initialTracks)
   const [averageScore, setAverageScore] = useState(album.average_score)
   const [accent, setAccent] = useState(album.dominant_color ?? '#6366f1')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
-  // ── Client-side color extraction (runs once if dominant_color not yet saved) ─
+  // ── Client-side color extraction ────────────────────────────────────────────
   useEffect(() => {
-    if (album.dominant_color || !album.cover_url) return // already have it or no cover
+    if (album.dominant_color || !album.cover_url) return
 
     const img = new window.Image()
     img.crossOrigin = 'anonymous'
@@ -45,24 +47,18 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
         setAccent(hex)
         await supabase.from('albums').update({ dominant_color: hex }).eq('id', album.id)
       } catch {
-        // non-fatal — fallback accent stays
+        // non-fatal
       }
     }
   }, [album.id, album.cover_url, album.dominant_color])
 
-  // ── Realtime: sync ratings from other squad members ────────────────────────
-  // Requires: Supabase dashboard → Realtime → enable for `tracks` table
+  // ── Realtime sync ───────────────────────────────────────────────────────────
   useEffect(() => {
     const channel = supabase
       .channel(`album-${album.id}`)
       .on(
         'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'tracks',
-          filter: `album_id=eq.${album.id}`,
-        },
+        { event: 'UPDATE', schema: 'public', table: 'tracks', filter: `album_id=eq.${album.id}` },
         (payload) => {
           setTracks((prev) => {
             const next = prev.map((t) =>
@@ -78,30 +74,49 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
     return () => { supabase.removeChannel(channel) }
   }, [album.id])
 
-  // ── Rating ─────────────────────────────────────────────────────────────────
+  // ── Rate track ──────────────────────────────────────────────────────────────
   const rateTrack = useCallback(
     async (trackId: string, rating: number) => {
-      // Optimistic update
       setTracks((prev) => {
         const next = prev.map((t) => (t.id === trackId ? { ...t, rating } : t))
         setAverageScore(computeAverage(next))
         return next
       })
-
-      // Persist + recompute stored average
       await supabase.from('tracks').update({ rating }).eq('id', trackId)
       await supabase.rpc('recompute_album_average', { p_album_id: album.id })
     },
     [album.id]
   )
 
-  // ── Styles ─────────────────────────────────────────────────────────────────
+  // ── Toggle interlude ────────────────────────────────────────────────────────
+  const markInterlude = useCallback(
+    async (trackId: string, isInterlude: boolean) => {
+      setTracks((prev) => {
+        const next = prev.map((t) => (t.id === trackId ? { ...t, is_interlude: isInterlude } : t))
+        setAverageScore(computeAverage(next))
+        return next
+      })
+      await supabase.from('tracks').update({ is_interlude: isInterlude }).eq('id', trackId)
+      await supabase.rpc('recompute_album_average', { p_album_id: album.id })
+    },
+    [album.id]
+  )
+
+  // ── Delete album ────────────────────────────────────────────────────────────
+  async function deleteAlbum() {
+    setDeleting(true)
+    await supabase.from('albums').delete().eq('id', album.id)
+    router.push('/')
+    router.refresh()
+  }
+
+  // ── Styles ──────────────────────────────────────────────────────────────────
   const gradient = `linear-gradient(to bottom, ${accent}cc 0%, ${accent}44 30%, #09090b 60%)`
 
   return (
     <div className="min-h-screen bg-zinc-950" style={{ background: gradient }}>
-      {/* Back button */}
-      <div className="sticky top-0 z-10 px-3 pt-safe">
+      {/* Header */}
+      <div className="sticky top-0 z-10 flex items-center justify-between px-3 pt-safe">
         <button
           onClick={() => router.back()}
           className="mt-2 flex items-center gap-0.5 rounded-xl px-2.5 py-2 text-white/70 transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-95 active:bg-white/15"
@@ -110,6 +125,33 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
           <ChevronLeft size={20} />
           <span className="text-sm font-medium">Back</span>
         </button>
+
+        {/* Delete */}
+        {confirmDelete ? (
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="rounded-xl px-3 py-2 text-xs text-zinc-400 transition-colors hover:text-white"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={deleteAlbum}
+              disabled={deleting}
+              className="rounded-xl bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/30 active:scale-95 disabled:opacity-50"
+            >
+              {deleting ? 'Deleting...' : 'Delete'}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="mt-2 rounded-xl p-2 text-white/30 transition-all duration-150 hover:bg-white/10 hover:text-white/70 active:scale-95"
+            aria-label="Delete album"
+          >
+            <Trash2 size={17} />
+          </button>
+        )}
       </div>
 
       <div className="px-4 pb-32">
@@ -144,7 +186,6 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
           <p className="mt-1 text-zinc-300">{album.artist}</p>
           {album.release_year && <p className="text-sm text-zinc-500">{album.release_year}</p>}
 
-          {/* Genre pills */}
           {album.genres.length > 0 && (
             <div className="mt-3 flex flex-wrap justify-center gap-1.5">
               {album.genres.slice(0, 5).map((g) => (
@@ -190,6 +231,7 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
               accentColor={accent}
               index={i}
               onRate={rateTrack}
+              onInterlude={markInterlude}
             />
           ))}
         </div>
