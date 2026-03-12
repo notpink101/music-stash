@@ -50,7 +50,7 @@ export default function SearchModal({ onClose, onImported }: Props) {
   }, [])
 
   useEffect(() => {
-    if (mode === 'spotify') inputRef.current?.focus()
+    if (mode === 'spotify') inputRef.current?.focus({ preventScroll: true })
   }, [mode])
 
   useEffect(() => {
