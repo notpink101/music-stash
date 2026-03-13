@@ -153,10 +153,11 @@ export async function getAlbumDetail(spotifyAlbumId: string): Promise<SpotifyAlb
     genres,
     tracks: trackItems
       .filter((t) => t != null)
-      .map((t) => ({
+      .sort((a, b) => a.disc_number - b.disc_number || a.track_number - b.track_number)
+      .map((t, i) => ({
         spotify_track_id: t.id,
         title: t.name,
-        track_number: t.track_number,
+        track_number: i + 1,
         duration_ms: t.duration_ms,
       })),
   }
@@ -183,6 +184,7 @@ interface SpotifyRawAlbum {
 interface SpotifyRawTrack {
   id: string
   name: string
+  disc_number: number
   track_number: number
   duration_ms: number
 }
