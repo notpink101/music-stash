@@ -79,7 +79,12 @@ export default function SearchModal({ onClose, onImported }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ spotifyAlbumId }),
       })
-      const album: Album = await res.json()
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data?.error ?? 'Failed to import album. Check Vercel logs.')
+        return
+      }
+      const album: Album = data
       onImported(album)
       router.push(`/album/${album.id}`)
     } finally {
@@ -108,7 +113,12 @@ export default function SearchModal({ onClose, onImported }: Props) {
           tracks: validTracks.map((t, i) => ({ title: t.title, track_number: i + 1 })),
         }),
       })
-      const album: Album = await res.json()
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data?.error ?? 'Failed to import album. Check Vercel logs.')
+        return
+      }
+      const album: Album = data
       onImported(album)
       router.push(`/album/${album.id}`)
     } finally {

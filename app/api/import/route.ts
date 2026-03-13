@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   // ── Check for existing import ──────────────────────────────────────────────
   const { data: existing, error: lookupError } = await supabase
     .from('albums')
-    .select('*, tracks(*)')
+    .select('*, tracks!tracks_album_id_fkey(*)')
     .eq('spotify_album_id', spotifyAlbumId)
     .maybeSingle()
 
