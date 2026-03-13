@@ -26,8 +26,8 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
   const [accent, setAccent] = useState(album.dominant_color ?? '#6366f1')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [favKTrackId, setFavKTrackId] = useState<string | null>(album.fav_k_track_id)
-  const [favLTrackId, setFavLTrackId] = useState<string | null>(album.fav_l_track_id)
+  const [favKTrackId, setFavKTrackId] = useState<string | null>(album.fav_k_track_id ?? null)
+  const [favLTrackId, setFavLTrackId] = useState<string | null>(album.fav_l_track_id ?? null)
 
   // ── Client-side color extraction ────────────────────────────────────────────
   useEffect(() => {

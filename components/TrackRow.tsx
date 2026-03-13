@@ -32,7 +32,7 @@ interface TrackRowProps {
 
 export default function TrackRow({ track, accentColor = '#6366f1', index = 0, onRate, onInterlude, isFavK, isFavL, onFavK, onFavL }: TrackRowProps) {
   const [localRating, setLocalRating] = useState<number | null>(track.rating)
-  const [isInterlude, setIsInterlude] = useState(track.is_interlude)
+  const [isInterlude, setIsInterlude] = useState(track.is_interlude ?? false)
   const [favMenuOpen, setFavMenuOpen] = useState(false)
   const isDragging = useRef(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -42,7 +42,7 @@ export default function TrackRow({ track, accentColor = '#6366f1', index = 0, on
   }, [track.rating])
 
   useEffect(() => {
-    setIsInterlude(track.is_interlude)
+    setIsInterlude(track.is_interlude ?? false)
   }, [track.is_interlude])
 
   // Close menu on outside tap

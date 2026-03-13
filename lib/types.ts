@@ -9,8 +9,8 @@ export interface Album {
   average_score: number | null
   release_year: number | null
   created_at: string
-  fav_k_track_id: string | null
-  fav_l_track_id: string | null
+  fav_k_track_id?: string | null
+  fav_l_track_id?: string | null
 }
 
 export interface Track {
@@ -21,5 +21,5 @@ export interface Track {
   track_number: number
   duration_ms: number
   rating: number | null
-  is_interlude: boolean
+  is_interlude?: boolean
 }
