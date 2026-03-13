@@ -26,6 +26,8 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
   const [accent, setAccent] = useState(album.dominant_color ?? '#6366f1')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [favKTrackId, setFavKTrackId] = useState<string | null>(album.fav_k_track_id)
+  const [favLTrackId, setFavLTrackId] = useState<string | null>(album.fav_l_track_id)
 
   // ── Client-side color extraction ────────────────────────────────────────────
   useEffect(() => {
@@ -101,6 +103,17 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
     },
     [album.id]
   )
+
+  // ── Favorites ───────────────────────────────────────────────────────────────
+  const setFavK = useCallback(async (trackId: string | null) => {
+    setFavKTrackId(trackId)
+    await supabase.from('albums').update({ fav_k_track_id: trackId }).eq('id', album.id)
+  }, [album.id])
+
+  const setFavL = useCallback(async (trackId: string | null) => {
+    setFavLTrackId(trackId)
+    await supabase.from('albums').update({ fav_l_track_id: trackId }).eq('id', album.id)
+  }, [album.id])
 
   // ── Delete album ────────────────────────────────────────────────────────────
   async function deleteAlbum() {
@@ -232,6 +245,10 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
               index={i}
               onRate={rateTrack}
               onInterlude={markInterlude}
+              isFavK={favKTrackId === track.id}
+              isFavL={favLTrackId === track.id}
+              onFavK={setFavK}
+              onFavL={setFavL}
             />
           ))}
         </div>

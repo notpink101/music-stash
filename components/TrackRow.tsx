@@ -24,9 +24,13 @@ interface TrackRowProps {
   index?: number
   onRate: (trackId: string, rating: number) => void
   onInterlude: (trackId: string, isInterlude: boolean) => void
+  isFavK: boolean
+  isFavL: boolean
+  onFavK: (trackId: string | null) => void
+  onFavL: (trackId: string | null) => void
 }
 
-export default function TrackRow({ track, accentColor = '#6366f1', index = 0, onRate, onInterlude }: TrackRowProps) {
+export default function TrackRow({ track, accentColor = '#6366f1', index = 0, onRate, onInterlude, isFavK, isFavL, onFavK, onFavL }: TrackRowProps) {
   const [localRating, setLocalRating] = useState<number | null>(track.rating)
   const [isInterlude, setIsInterlude] = useState(track.is_interlude)
   const isDragging = useRef(false)
@@ -101,6 +105,24 @@ export default function TrackRow({ track, accentColor = '#6366f1', index = 0, on
       >
         {isInterlude ? '—' : localRating !== null ? localRating : '—'}
       </span>
+
+      {/* Fav K */}
+      <button
+        onClick={() => onFavK(isFavK ? null : track.id)}
+        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-black transition-all ${
+          isFavK ? 'bg-pink-200/20 text-pink-200 scale-110' : 'text-zinc-700 hover:text-pink-200/50'
+        }`}
+        aria-label={isFavK ? "Remove K's favorite" : "Set as K's favorite"}
+      >K</button>
+
+      {/* Fav L */}
+      <button
+        onClick={() => onFavL(isFavL ? null : track.id)}
+        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-black transition-all ${
+          isFavL ? 'bg-cyan-200/20 text-cyan-200 scale-110' : 'text-zinc-700 hover:text-cyan-200/50'
+        }`}
+        aria-label={isFavL ? "Remove L's favorite" : "Set as L's favorite"}
+      >L</button>
 
       {/* Interlude toggle */}
       <button

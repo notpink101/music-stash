@@ -9,6 +9,8 @@ export interface Album {
   average_score: number | null
   release_year: number | null
   created_at: string
+  fav_k_track_id: string | null
+  fav_l_track_id: string | null
 }
 
 export interface Track {

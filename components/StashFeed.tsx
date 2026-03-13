@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { Search, Disc3, SlidersHorizontal, X, Plus } from 'lucide-react'
 import AlbumCard from './AlbumCard'
 import SearchModal from './SearchModal'
 import type { Album } from '@/lib/types'
 
-type SortKey = 'newest' | 'top'
+type SortKey = 'newest' | 'top' | 'alpha'
 type GridSize = 'sm' | 'md' | 'lg'
 
 const GRID: Record<GridSize, string> = {
@@ -22,6 +22,17 @@ interface Props {
 export default function StashFeed({ initialAlbums }: Props) {
   const [albums, setAlbums] = useState(initialAlbums)
   const [sort, setSort] = useState<SortKey>('newest')
+
+  // Persist sort across navigation / refresh
+  useEffect(() => {
+    const saved = localStorage.getItem('stash-sort') as SortKey | null
+    if (saved) setSort(saved)
+  }, [])
+
+  function handleSetSort(key: SortKey) {
+    setSort(key)
+    localStorage.setItem('stash-sort', key)
+  }
   const [gridSize, setGridSize] = useState<GridSize>('sm')
   const [searchOpen, setSearchOpen] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
@@ -45,6 +56,8 @@ export default function StashFeed({ initialAlbums }: Props) {
   const sorted = useMemo(() => {
     if (sort === 'top')
       return [...albums].sort((a, b) => (b.average_score ?? -1) - (a.average_score ?? -1))
+    if (sort === 'alpha')
+      return [...albums].sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title))
     return albums
   }, [albums, sort])
 
@@ -135,13 +148,13 @@ export default function StashFeed({ initialAlbums }: Props) {
         <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-3">
           {/* Left: sort + filter */}
           <div className="flex min-w-0 gap-1.5 overflow-x-auto scrollbar-none">
-            {(['newest', 'top'] as const).map((key) => (
+            {(['newest', 'top', 'alpha'] as const).map((key) => (
               <button
                 key={key}
-                onClick={() => setSort(key)}
+                onClick={() => handleSetSort(key)}
                 className={`${pillBase} ${sort === key ? pillActive : pillInactive}`}
               >
-                {key === 'newest' ? 'Newest' : 'Top Rated'}
+                {key === 'newest' ? 'Newest' : key === 'top' ? 'Top Rated' : 'A→Z'}
               </button>
             ))}
 
