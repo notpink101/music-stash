@@ -35,6 +35,7 @@ export default function SearchModal({ onClose, onImported }: Props) {
   const [manualGenres, setManualGenres] = useState('')
   const [manualTracks, setManualTracks] = useState([{ title: '' }])
   const [manualSubmitting, setManualSubmitting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
 
   // Lock body scroll while modal is open (iOS-safe)
   useEffect(() => {
@@ -73,6 +74,7 @@ export default function SearchModal({ onClose, onImported }: Props) {
   }, [query])
 
   async function handleSelect(spotifyAlbumId: string) {
+    setImportError(null)
     setImporting(spotifyAlbumId)
     try {
       const res = await fetch('/api/import', {
@@ -82,7 +84,7 @@ export default function SearchModal({ onClose, onImported }: Props) {
       })
       const data = await res.json()
       if (!res.ok) {
-        alert(data?.error ?? 'Failed to import album. Check Vercel logs.')
+        setImportError(data?.error ?? 'Failed to import album')
         return
       }
       const album: Album = data
@@ -98,6 +100,7 @@ export default function SearchModal({ onClose, onImported }: Props) {
     const validTracks = manualTracks.filter((t) => t.title.trim())
     if (!manualTitle.trim() || !manualArtist.trim() || validTracks.length === 0) return
 
+    setImportError(null)
     setManualSubmitting(true)
     try {
       const res = await fetch('/api/import-manual', {
@@ -116,7 +119,7 @@ export default function SearchModal({ onClose, onImported }: Props) {
       })
       const data = await res.json()
       if (!res.ok) {
-        alert(data?.error ?? 'Failed to import album. Check Vercel logs.')
+        setImportError(data?.error ?? 'Failed to import album')
         return
       }
       const album: Album = data
@@ -195,6 +198,12 @@ export default function SearchModal({ onClose, onImported }: Props) {
       {/* ── Spotify results ── */}
       {mode === 'spotify' && (
         <div className="flex-1 divide-y divide-white/5 overflow-y-auto">
+          {importError && (
+            <div className="mb-3 flex items-center justify-between rounded-lg bg-red-900/40 px-3 py-2 text-sm text-red-300">
+              <span>{importError}</span>
+              <button onClick={() => setImportError(null)} className="ml-2 text-red-400 hover:text-red-200">✕</button>
+            </div>
+          )}
           {results.map((r) => (
             <button
               key={r.spotify_album_id}
@@ -314,6 +323,12 @@ export default function SearchModal({ onClose, onImported }: Props) {
 
           {/* Submit */}
           <div className="shrink-0 border-t border-white/5 bg-zinc-950/90 px-4 pb-8 pt-3 backdrop-blur-sm">
+            {importError && (
+              <div className="mb-3 flex items-center justify-between rounded-lg bg-red-900/40 px-3 py-2 text-sm text-red-300">
+                <span>{importError}</span>
+                <button onClick={() => setImportError(null)} className="ml-2 text-red-400 hover:text-red-200">✕</button>
+              </div>
+            )}
             <button
               type="submit"
               disabled={!manualValid || manualSubmitting}
