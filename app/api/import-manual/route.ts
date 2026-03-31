@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { importAlbum } from '@/lib/importAlbum'
 
 interface ManualTrack {
   title: string
@@ -103,43 +103,24 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const { data: album, error: albumError } = await supabase
-    .from('albums')
-    .insert({
-      spotify_album_id: null,
-      title,
-      artist,
-      cover_url: coverUrl,
-      dominant_color: null,
-      genres: sanitizedGenres,
-      release_year: b.release_year ?? null,
-    })
-    .select()
-    .single()
+  const result = await importAlbum({
+    spotify_album_id: null,
+    title,
+    artist,
+    cover_url: coverUrl,
+    genres: sanitizedGenres,
+    release_year: b.release_year ?? null,
+    tracks: b.tracks.map((t) => ({
+      spotify_track_id: null,
+      title: stripHtml(t.title).trim(),
+      track_number: t.track_number,
+      duration_ms: 0,
+    })),
+  })
 
-  if (albumError || !album) {
-    console.error('[/api/import-manual] Album insert error', albumError)
-    return NextResponse.json({ error: 'Failed to save album' }, { status: 500 })
+  if (!result.success) {
+    return NextResponse.json({ error: result.error }, { status: result.status })
   }
 
-  const trackRows = b.tracks.map((t) => ({
-    album_id: album.id,
-    spotify_track_id: null,
-    title: stripHtml(t.title).trim(),
-    track_number: t.track_number,
-    duration_ms: 0,
-  }))
-
-  const { data: tracks, error: tracksError } = await supabase
-    .from('tracks')
-    .insert(trackRows)
-    .select()
-
-  if (tracksError) {
-    console.error('[/api/import-manual] Tracks insert error', tracksError)
-    await supabase.from('albums').delete().eq('id', album.id)
-    return NextResponse.json({ error: 'Failed to save tracks' }, { status: 500 })
-  }
-
-  return NextResponse.json({ ...album, tracks }, { status: 201 })
+  return NextResponse.json(result.album, { status: 201 })
 }
