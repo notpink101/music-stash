@@ -73,7 +73,7 @@ export default function TrackRow({ track, accentColor = DEFAULT_ACCENT_COLOR, in
 
   return (
     <div
-      className={`-mx-4 flex items-center gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0 animate-fade-in transition-colors ${rowHighlight} ${!isFavK && !isFavL ? 'hover:bg-white/[0.04]' : ''}`}
+      className={`-mx-4 flex items-center gap-3 border-b border-b-white/[0.06] px-4 py-3 last:border-b-0 animate-fade-in transition-colors ${rowHighlight} ${!isFavK && !isFavL ? 'hover:bg-white/[0.04]' : ''}`}
       style={{ animationDelay: `${index * 30}ms` }}
     >
       {/* Track number */}

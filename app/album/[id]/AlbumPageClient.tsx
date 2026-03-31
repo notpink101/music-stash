@@ -460,7 +460,7 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
 
         {/* Track list */}
         <div
-          className="mt-8 rounded-2xl bg-black/30 px-4 backdrop-blur-sm animate-slide-up"
+          className="mt-8 overflow-hidden rounded-2xl bg-black/30 px-4 backdrop-blur-sm animate-slide-up"
           style={{ animationDelay: '160ms' }}
         >
           {displayTracks.map((track, i) => (
