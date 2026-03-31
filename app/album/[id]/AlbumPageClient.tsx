@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft, Share2, Trash2 } from 'lucide-react'
+import { ChevronLeft, Pencil, Share2, Trash2 } from 'lucide-react'
 import { DEFAULT_ACCENT_COLOR } from '@/lib/constants'
 import { supabase } from '@/lib/supabase'
 import TrackRow from '@/components/TrackRow'
@@ -42,6 +42,14 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
   const [deleting, setDeleting] = useState(false)
   const [favKTrackId, setFavKTrackId] = useState<string | null>(album.fav_k_track_id ?? null)
   const [favLTrackId, setFavLTrackId] = useState<string | null>(album.fav_l_track_id ?? null)
+  const [showBulkRater, setShowBulkRater] = useState(false)
+  const [bulkRating, setBulkRating] = useState(7)
+  const [notes, setNotes] = useState<string>(album.notes ?? '')
+  const [editingNotes, setEditingNotes] = useState(false)
+  const notesSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── Derived counts ──────────────────────────────────────────────────────────
+  const unratedCount = tracks.filter(t => t.rating === null && !t.is_interlude).length
 
   // ── Sorted track list ───────────────────────────────────────────────────────
   const displayTracks = useMemo(() => {
@@ -170,6 +178,19 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
     await supabase.from('albums').update({ fav_l_track_id: trackId }).eq('id', album.id)
   }, [album.id])
 
+  // ── Notes ───────────────────────────────────────────────────────────────────
+  const saveNotes = useCallback(async (value: string) => {
+    await supabase.from('albums').update({ notes: value }).eq('id', album.id)
+  }, [album.id])
+
+  const handleNotesBlur = useCallback((value: string) => {
+    setEditingNotes(false)
+    if (notesSaveTimer.current) clearTimeout(notesSaveTimer.current)
+    notesSaveTimer.current = setTimeout(() => {
+      saveNotes(value)
+    }, 500)
+  }, [saveNotes])
+
   // ── Share album ─────────────────────────────────────────────────────────────
   async function shareAlbum() {
     const text = buildShareText(album, tracks, averageScore)
@@ -189,6 +210,43 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
     toast('Album deleted', 'success')
     router.push('/')
     router.refresh()
+  }
+
+  // ── Bulk rate ───────────────────────────────────────────────────────────────
+  async function bulkRate(rating: number) {
+    const unrated = tracks.filter(t => t.rating === null && !t.is_interlude)
+    if (unrated.length === 0) return
+
+    // Capture for rollback
+    const prevTracks = tracksRef.current
+    const prevScore = averageRef.current
+
+    // Optimistic update all at once
+    setTracks((prev) => {
+      const unratedIds = new Set(unrated.map(t => t.id))
+      const next = prev.map(t => unratedIds.has(t.id) ? { ...t, rating } : t)
+      setAverageScore(computeAverage(next))
+      return next
+    })
+
+    setShowBulkRater(false)
+
+    // Batch DB update — single query instead of N sequential writes
+    const { error } = await supabase
+      .from('tracks')
+      .update({ rating })
+      .in('id', unrated.map(t => t.id))
+
+    if (error) {
+      // Rollback via refs
+      setTracks(prevTracks)
+      setAverageScore(prevScore)
+      toast('Failed to apply bulk rating', 'error')
+      return
+    }
+
+    // Single RPC call to recompute average
+    await supabase.rpc('recompute_album_average', { p_album_id: album.id })
   }
 
   // ── Styles ──────────────────────────────────────────────────────────────────
@@ -311,18 +369,47 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
             )}
           </div>
 
-          {/* Sort toggle */}
-          <div className="flex gap-2 mt-2">
-            <button
-              onClick={() => setTrackSort(trackSort === 'default' ? 'rating' : 'default')}
-              className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                trackSort === 'rating'
-                  ? 'bg-white text-black'
-                  : 'bg-white/10 text-white/70 hover:bg-white/20'
-              }`}
-            >
-              {trackSort === 'rating' ? 'By rating' : 'Track order'}
-            </button>
+          {/* Sort toggle + Bulk rate */}
+          <div className="flex flex-col items-center gap-2 mt-2">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setTrackSort(trackSort === 'default' ? 'rating' : 'default')}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                  trackSort === 'rating'
+                    ? 'bg-white text-black'
+                    : 'bg-white/10 text-white/70 hover:bg-white/20'
+                }`}
+              >
+                {trackSort === 'rating' ? 'By rating' : 'Track order'}
+              </button>
+              {unratedCount > 0 && !showBulkRater && (
+                <button
+                  onClick={() => setShowBulkRater(true)}
+                  className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white/70 transition-colors hover:bg-white/20"
+                >
+                  Rate all unrated ({unratedCount})
+                </button>
+              )}
+            </div>
+            {showBulkRater && (
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  type="range"
+                  min={1}
+                  max={10}
+                  value={bulkRating}
+                  onChange={e => setBulkRating(Number(e.target.value))}
+                  className="w-32"
+                />
+                <span className="text-white font-bold w-4">{bulkRating}</span>
+                <button onClick={() => bulkRate(bulkRating)} className="rounded-full bg-white text-black px-3 py-1 text-xs font-bold">
+                  Apply
+                </button>
+                <button onClick={() => setShowBulkRater(false)} className="text-white/50 text-xs">
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
