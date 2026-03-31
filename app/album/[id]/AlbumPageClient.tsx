@@ -180,8 +180,11 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
 
   // ── Notes ───────────────────────────────────────────────────────────────────
   const saveNotes = useCallback(async (value: string) => {
-    await supabase.from('albums').update({ notes: value }).eq('id', album.id)
-  }, [album.id])
+    const { error } = await supabase.from('albums').update({ notes: value }).eq('id', album.id)
+    if (error) {
+      toast('Failed to save note', 'error')
+    }
+  }, [album.id, toast])
 
   const handleNotesBlur = useCallback((value: string) => {
     setEditingNotes(false)
@@ -411,6 +414,48 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Notes */}
+        <div className="mt-5 animate-slide-up" style={{ animationDelay: '140ms' }}>
+          {editingNotes ? (
+            <div className="rounded-2xl bg-black/30 px-4 py-3 backdrop-blur-sm">
+              <textarea
+                autoFocus
+                value={notes}
+                maxLength={500}
+                onChange={(e) => setNotes(e.target.value)}
+                onBlur={(e) => handleNotesBlur(e.target.value)}
+                placeholder="Add a note about this album..."
+                className="w-full resize-none bg-transparent text-sm text-white/80 placeholder-white/25 outline-none"
+                rows={3}
+              />
+              <div className="mt-1 flex items-center justify-between">
+                <span className={`text-[11px] ${notes.length >= 450 ? 'text-amber-400' : 'text-zinc-600'}`}>
+                  {notes.length}/500
+                </span>
+                <button
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    handleNotesBlur(notes)
+                  }}
+                  className="text-[11px] font-medium text-zinc-400 hover:text-white transition-colors"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setEditingNotes(true)}
+              className="group flex w-full items-start gap-2 rounded-2xl bg-black/20 px-4 py-3 text-left transition-colors hover:bg-black/30 backdrop-blur-sm"
+            >
+              <Pencil size={13} className="mt-0.5 shrink-0 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
+              <span className={`text-sm leading-snug ${notes ? 'text-white/60' : 'text-white/25'}`}>
+                {notes || 'Add a note...'}
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Track list */}

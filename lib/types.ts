@@ -11,6 +11,7 @@ export interface Album {
   created_at: string
   fav_k_track_id?: string | null
   fav_l_track_id?: string | null
+  notes: string | null
 }
 
 export interface Track {
