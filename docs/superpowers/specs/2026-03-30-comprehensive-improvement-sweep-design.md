@@ -48,6 +48,8 @@ SPOTIFY_CLIENT_SECRET="your-spotify-client-secret"
 
 **Note:** The real `.env.local` file will NOT be touched.
 
+**Post-cleanup:** After cleaning the example file, rotate the Spotify client secret in the Spotify Developer Dashboard and update `.env.local` with the new value. Evaluate whether Supabase keys need rotation (the anon key is designed to be public with RLS, but the exposure confirms the project ID and region).
+
 ### 1.2 Input Sanitization on Manual Album Form
 
 **Problem:** `/api/import-manual` accepts arbitrary `cover_url` values with no validation. Text inputs aren't sanitized for HTML/script content.
@@ -59,9 +61,11 @@ SPOTIFY_CLIENT_SECRET="your-spotify-client-secret"
 - Validate `genres` array contains only strings, max 20 genres
 - Validate each track has a non-empty title after trimming
 
-### 1.3 Transaction Safety on Imports
+### 1.3 Shared Import Helper with Cleanup
 
-**Problem:** In both import routes, album insert and track insert are separate operations. If tracks fail, the code attempts to delete the album, but this cleanup could itself fail silently, leaving orphaned albums.
+**Problem:** In both import routes, album insert and track insert are separate operations with ~60% duplicated code. If tracks fail, the code attempts to delete the album, but this cleanup could itself fail silently, leaving orphaned albums.
+
+**Note:** True database transactions would require a Supabase RPC wrapping both inserts in `BEGIN`/`COMMIT`. The current approach (insert album, insert tracks, cleanup on failure) is best-effort — acceptable for this app's scale, but not atomic. If orphaned albums become an issue, a Supabase RPC can be added later.
 
 **Fix:** Extract shared import logic into `lib/importAlbum.ts`:
 
@@ -156,14 +160,19 @@ This also means when one user rates tracks (updating `average_score`), the other
 
 **Problem:** In `AlbumPageClient.tsx`, `rateTrack` updates local state immediately but doesn't revert if the DB write fails. The user sees a rating that never persisted.
 
-**Fix:** Modify `rateTrack` to capture previous state and rollback on error:
+**Fix:** Use a ref to capture previous state for rollback, keeping the `useCallback` dependency array lean (`[album.id]` only) to avoid unnecessary re-renders of `TrackRow` components:
 
 ```typescript
+const tracksRef = useRef(tracks)
+tracksRef.current = tracks
+const averageRef = useRef(averageScore)
+averageRef.current = averageScore
+
 const rateTrack = useCallback(
   async (trackId: string, rating: number) => {
-    // Capture previous state for rollback
-    const prevTracks = tracks
-    const prevScore = averageScore
+    // Capture previous state for rollback via refs
+    const prevTracks = tracksRef.current
+    const prevScore = averageRef.current
 
     // Optimistic update
     setTracks((prev) => {
@@ -183,11 +192,11 @@ const rateTrack = useCallback(
     }
     await supabase.rpc('recompute_album_average', { p_album_id: album.id })
   },
-  [album.id, tracks, averageScore]
+  [album.id]
 )
 ```
 
-Same pattern applies to `markInterlude`.
+Same pattern applies to `markInterlude`. This keeps `onRate`/`onInterlude` callback identity stable, avoiding re-renders of all TrackRow components on every rating change.
 
 ### 2.3 Color Extraction Fallback
 
@@ -224,22 +233,23 @@ Same pattern applies to `markInterlude`.
 const PAGE_SIZE = 30
 
 export default async function HomePage() {
-  const { data, count } = await supabase
+  const { data } = await supabase
     .from('albums')
-    .select('*', { count: 'exact' })
+    .select('*')
     .order('created_at', { ascending: false })
     .range(0, PAGE_SIZE - 1)
 
-  return <StashFeed initialAlbums={(data as Album[]) ?? []} totalCount={count ?? 0} pageSize={PAGE_SIZE} />
+  return <StashFeed initialAlbums={(data as Album[]) ?? []} pageSize={PAGE_SIZE} />
 }
 ```
 
 **Client component (`StashFeed.tsx`):**
-- Accept `totalCount` and `pageSize` props
+- Accept `pageSize` prop (no `totalCount` — use a `hasMore` boolean instead)
 - Add a `loadMore` function that fetches the next page using `.range(offset, offset + pageSize - 1)`
-- Show a "Load more" button at the bottom when `albums.length < totalCount`
-- The realtime subscription (Wave 2) handles new albums appearing at the top
-- Sort/filter operates on loaded albums client-side (sufficient for <500 albums)
+- Determine `hasMore` by checking if the last fetch returned a full page (`fetchedCount === pageSize`)
+- Show a "Load more" button at the bottom when `hasMore` is true
+- The realtime subscription (Wave 2) handles new albums appearing at the top — `hasMore` is unaffected by realtime inserts since it's based on fetch results, not total count
+- **Sort interaction with pagination:** When only a subset of albums is loaded, client-side "Top Rated" sort only sorts loaded albums — not the global top. This is acceptable UX at <200 albums where most will be loaded after a few "Load more" taps. At larger scale, sort should move to server-side queries (out of scope for now).
 
 ### 3.2 Extract Constants
 
@@ -316,6 +326,8 @@ export default function GlobalError({ error, reset }: { error: Error; reset: () 
 ```
 
 Also create `app/album/[id]/error.tsx` with similar styling but an option to go back to the library.
+
+**Note:** `app/error.tsx` catches errors in page components but not in the root layout itself. For root layout crashes, `app/global-error.tsx` would be needed — but root layout crashes are extremely rare in this app. `app/error.tsx` covers the practical cases.
 
 ### 4.2 Skeleton Loading States
 
@@ -413,6 +425,7 @@ UI in `AlbumPageClient.tsx`:
 - Shows the note text when not editing, with a pencil icon to edit
 - Max 500 characters with a character counter
 - Realtime sync via the existing album channel (listen for UPDATE on albums table)
+- **Concurrent editing:** Two users could edit notes simultaneously, with the last save winning. For a small friend group this is acceptable — the note is casual commentary, not critical data.
 
 Update `lib/types.ts`:
 ```typescript
@@ -441,9 +454,30 @@ const unratedCount = tracks.filter(t => t.rating === null && !t.is_interlude).le
 
 async function bulkRate(rating: number) {
   const unrated = tracks.filter(t => t.rating === null && !t.is_interlude)
-  for (const track of unrated) {
-    await rateTrack(track.id, rating)
+
+  // Optimistic update all at once
+  setTracks((prev) => {
+    const unratedIds = new Set(unrated.map(t => t.id))
+    const next = prev.map(t => unratedIds.has(t.id) ? { ...t, rating } : t)
+    setAverageScore(computeAverage(next))
+    return next
+  })
+
+  // Batch DB update — single query instead of N sequential writes
+  const { error } = await supabase
+    .from('tracks')
+    .update({ rating })
+    .in('id', unrated.map(t => t.id))
+
+  if (error) {
+    // Rollback via ref
+    setTracks(tracksRef.current)
+    setAverageScore(averageRef.current)
+    return
   }
+
+  // Single RPC call to recompute average
+  await supabase.rpc('recompute_album_average', { p_album_id: album.id })
 }
 ```
 
@@ -480,6 +514,8 @@ Implementation:
 | Add `notes` column | `albums` | `ALTER TABLE albums ADD COLUMN notes text` |
 
 No other schema changes required. The favorites constraint issue (1.4) doesn't need schema changes since the current column-based approach is inherently single-valued per album.
+
+**Configuration change:** Wave 2.1 requires Supabase Realtime to be enabled on the `albums` table (INSERT, UPDATE, DELETE events). Realtime is already enabled on `tracks` (used by `AlbumPageClient.tsx`), but the `albums` table subscription is new. Enable via Supabase Dashboard > Database > Replication, or via SQL: `ALTER PUBLICATION supabase_realtime ADD TABLE albums;`
 
 ---
 
