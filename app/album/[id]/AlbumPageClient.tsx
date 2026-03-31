@@ -164,7 +164,8 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
       <div className="sticky top-0 z-10 flex items-center justify-between px-3 pt-safe">
         <button
           onClick={() => router.back()}
-          className="mt-2 flex items-center gap-0.5 rounded-xl px-2.5 py-2 text-white/70 transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-95 active:bg-white/15"
+          disabled={deleting}
+          className="mt-2 flex items-center gap-0.5 rounded-xl px-2.5 py-2 text-white/70 transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-95 active:bg-white/15 disabled:opacity-50 disabled:pointer-events-none"
           aria-label="Go back"
         >
           <ChevronLeft size={20} />
