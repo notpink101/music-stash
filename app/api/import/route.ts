@@ -5,6 +5,21 @@ import { importAlbum } from '@/lib/importAlbum'
 
 // dominant_color is extracted client-side via colorthief after import and saved back via Supabase
 
+// ─── Request body types ────────────────────────────────────────────────────────
+
+interface ImportBody {
+  spotifyAlbumId: string
+}
+
+function isImportBody(body: unknown): body is ImportBody {
+  return (
+    typeof body === 'object' &&
+    body !== null &&
+    typeof (body as ImportBody).spotifyAlbumId === 'string' &&
+    (body as ImportBody).spotifyAlbumId.trim() !== ''
+  )
+}
+
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
@@ -15,10 +30,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const spotifyAlbumId = (body as Record<string, unknown>)?.spotifyAlbumId
-  if (typeof spotifyAlbumId !== 'string' || !spotifyAlbumId.trim()) {
+  if (!isImportBody(body)) {
     return NextResponse.json({ error: 'Missing field: spotifyAlbumId' }, { status: 400 })
   }
+
+  const spotifyAlbumId = body.spotifyAlbumId
 
   // ── Check for existing import ──────────────────────────────────────────────
   const { data: existing, error: lookupError } = await supabase
