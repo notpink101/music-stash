@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft, Trash2 } from 'lucide-react'
@@ -28,6 +28,12 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
   const [deleting, setDeleting] = useState(false)
   const [favKTrackId, setFavKTrackId] = useState<string | null>(album.fav_k_track_id ?? null)
   const [favLTrackId, setFavLTrackId] = useState<string | null>(album.fav_l_track_id ?? null)
+
+  // ── Refs for rollback ───────────────────────────────────────────────────────
+  const tracksRef = useRef(tracks)
+  tracksRef.current = tracks
+  const averageRef = useRef(averageScore)
+  averageRef.current = averageScore
 
   // ── Client-side color extraction ────────────────────────────────────────────
   useEffect(() => {
@@ -79,12 +85,25 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
   // ── Rate track ──────────────────────────────────────────────────────────────
   const rateTrack = useCallback(
     async (trackId: string, rating: number) => {
+      // Capture previous state for rollback via refs
+      const prevTracks = tracksRef.current
+      const prevScore = averageRef.current
+
+      // Optimistic update
       setTracks((prev) => {
         const next = prev.map((t) => (t.id === trackId ? { ...t, rating } : t))
         setAverageScore(computeAverage(next))
         return next
       })
-      await supabase.from('tracks').update({ rating }).eq('id', trackId)
+
+      // Persist
+      const { error } = await supabase.from('tracks').update({ rating }).eq('id', trackId)
+      if (error) {
+        // Rollback
+        setTracks(prevTracks)
+        setAverageScore(prevScore)
+        return
+      }
       await supabase.rpc('recompute_album_average', { p_album_id: album.id })
     },
     [album.id]
@@ -93,12 +112,25 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
   // ── Toggle interlude ────────────────────────────────────────────────────────
   const markInterlude = useCallback(
     async (trackId: string, isInterlude: boolean) => {
+      // Capture previous state for rollback via refs
+      const prevTracks = tracksRef.current
+      const prevScore = averageRef.current
+
+      // Optimistic update
       setTracks((prev) => {
         const next = prev.map((t) => (t.id === trackId ? { ...t, is_interlude: isInterlude } : t))
         setAverageScore(computeAverage(next))
         return next
       })
-      await supabase.from('tracks').update({ is_interlude: isInterlude }).eq('id', trackId)
+
+      // Persist
+      const { error } = await supabase.from('tracks').update({ is_interlude: isInterlude }).eq('id', trackId)
+      if (error) {
+        // Rollback
+        setTracks(prevTracks)
+        setAverageScore(prevScore)
+        return
+      }
       await supabase.rpc('recompute_album_average', { p_album_id: album.id })
     },
     [album.id]
