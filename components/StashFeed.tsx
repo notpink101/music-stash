@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { Search, Disc3, SlidersHorizontal, X, Plus } from 'lucide-react'
 import AlbumCard from './AlbumCard'
 import SearchModal from './SearchModal'
+import { supabase } from '@/lib/supabase'
 import type { Album } from '@/lib/types'
 
 type SortKey = 'newest' | 'top' | 'alpha'
@@ -17,10 +18,15 @@ const GRID: Record<GridSize, string> = {
 
 interface Props {
   initialAlbums: Album[]
+  pageSize: number
 }
 
-export default function StashFeed({ initialAlbums }: Props) {
+export default function StashFeed({ initialAlbums, pageSize }: Props) {
   const [albums, setAlbums] = useState(initialAlbums)
+  const [offset, setOffset] = useState(pageSize)
+  const [hasMore, setHasMore] = useState(initialAlbums.length === pageSize)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
   const [sort, setSort] = useState<SortKey>('newest')
 
   // Persist sort across navigation / refresh
@@ -28,6 +34,62 @@ export default function StashFeed({ initialAlbums }: Props) {
     const saved = localStorage.getItem('stash-sort') as SortKey | null
     if (saved) setSort(saved)
   }, [])
+
+  // Subscribe to realtime albums updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('albums-feed')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'albums' },
+        (payload) => {
+          setAlbums((prev) => [payload.new as Album, ...prev.filter(a => a.id !== (payload.new as Album).id)])
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'albums' },
+        (payload) => {
+          setAlbums((prev) => prev.filter(a => a.id !== (payload.old as Album).id))
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'albums' },
+        (payload) => {
+          setAlbums((prev) => prev.map(a => a.id === (payload.new as Album).id ? { ...a, ...(payload.new as Album) } : a))
+        }
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [])
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    const { data, error } = await supabase
+      .from('albums')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + pageSize - 1)
+
+    if (error) {
+      setLoadMoreError('Failed to load more albums. Tap to retry.')
+      setLoadingMore(false)
+      return
+    }
+
+    setLoadMoreError(null)
+    const fetched = (data as Album[]) ?? []
+    setAlbums((prev) => {
+      const ids = new Set(prev.map((a) => a.id))
+      return [...prev, ...fetched.filter((a) => !ids.has(a.id))]
+    })
+    setOffset((prev) => prev + pageSize)
+    setHasMore(fetched.length === pageSize)
+    setLoadingMore(false)
+  }
 
   function handleSetSort(key: SortKey) {
     setSort(key)
@@ -302,11 +364,27 @@ export default function StashFeed({ initialAlbums }: Props) {
             </button>
           </div>
         ) : (
-          <div className={`grid pt-1 ${GRID[gridSize]}`}>
-            {filtered.map((album, i) => (
-              <AlbumCard key={album.id} album={album} index={i} />
-            ))}
-          </div>
+          <>
+            <div className={`grid pt-1 ${GRID[gridSize]}`}>
+              {filtered.map((album, i) => (
+                <AlbumCard key={album.id} album={album} index={i} />
+              ))}
+            </div>
+            {hasMore && (
+              <div className="flex flex-col items-center gap-2 py-6">
+                {loadMoreError && (
+                  <p className="text-sm text-red-400 text-center">{loadMoreError}</p>
+                )}
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="rounded-full bg-zinc-800 px-6 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:bg-zinc-700 active:scale-95 disabled:opacity-50"
+                >
+                  {loadingMore ? 'Loading…' : 'Load more'}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 

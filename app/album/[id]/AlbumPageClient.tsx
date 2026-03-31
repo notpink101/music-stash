@@ -1,11 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft, Trash2 } from 'lucide-react'
+import { ChevronLeft, Pencil, Share2, Trash2 } from 'lucide-react'
+import { DEFAULT_ACCENT_COLOR } from '@/lib/constants'
 import { supabase } from '@/lib/supabase'
 import TrackRow from '@/components/TrackRow'
+import { useToast } from '@/components/Toast'
 import type { Album, Track } from '@/lib/types'
 
 interface Props {
@@ -19,15 +21,49 @@ function computeAverage(tracks: Track[]): number | null {
   return rated.reduce((sum, t) => sum + t.rating!, 0) / rated.length
 }
 
+function buildShareText(album: Album, tracks: Track[], averageScore: number | null): string {
+  const score = averageScore != null ? averageScore.toFixed(1) : '—'
+  const trackLines = tracks
+    .slice()
+    .sort((a, b) => a.track_number - b.track_number)
+    .map((t) => `${t.track_number}. ${t.title} — ${t.rating ?? '—'}`)
+    .join('\n')
+  return `🎵 ${album.title} — ${album.artist}\n⭐ ${score}/10\n\n${trackLines}\n\nRated on The Stash`
+}
+
 export default function AlbumPageClient({ album, initialTracks }: Props) {
   const router = useRouter()
+  const { toast } = useToast()
   const [tracks, setTracks] = useState(initialTracks)
   const [averageScore, setAverageScore] = useState(album.average_score)
-  const [accent, setAccent] = useState(album.dominant_color ?? '#6366f1')
+  const [accent, setAccent] = useState(album.dominant_color ?? DEFAULT_ACCENT_COLOR)
+  const [trackSort, setTrackSort] = useState<'default' | 'rating'>('default')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [favKTrackId, setFavKTrackId] = useState<string | null>(album.fav_k_track_id ?? null)
   const [favLTrackId, setFavLTrackId] = useState<string | null>(album.fav_l_track_id ?? null)
+  const [showBulkRater, setShowBulkRater] = useState(false)
+  const [bulkRating, setBulkRating] = useState(7)
+  const [notes, setNotes] = useState<string>(album.notes ?? '')
+  const [editingNotes, setEditingNotes] = useState(false)
+  const notesSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── Derived counts ──────────────────────────────────────────────────────────
+  const unratedCount = tracks.filter(t => t.rating === null && !t.is_interlude).length
+
+  // ── Sorted track list ───────────────────────────────────────────────────────
+  const displayTracks = useMemo(() => {
+    if (trackSort === 'rating') {
+      return [...tracks].sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1))
+    }
+    return tracks
+  }, [tracks, trackSort])
+
+  // ── Refs for rollback ───────────────────────────────────────────────────────
+  const tracksRef = useRef(tracks)
+  tracksRef.current = tracks
+  const averageRef = useRef(averageScore)
+  averageRef.current = averageScore
 
   // ── Client-side color extraction ────────────────────────────────────────────
   useEffect(() => {
@@ -79,12 +115,26 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
   // ── Rate track ──────────────────────────────────────────────────────────────
   const rateTrack = useCallback(
     async (trackId: string, rating: number) => {
+      // Capture previous state for rollback via refs
+      const prevTracks = tracksRef.current
+      const prevScore = averageRef.current
+
+      // Optimistic update
       setTracks((prev) => {
         const next = prev.map((t) => (t.id === trackId ? { ...t, rating } : t))
         setAverageScore(computeAverage(next))
         return next
       })
-      await supabase.from('tracks').update({ rating }).eq('id', trackId)
+
+      // Persist
+      const { error } = await supabase.from('tracks').update({ rating }).eq('id', trackId)
+      if (error) {
+        // Rollback
+        setTracks(prevTracks)
+        setAverageScore(prevScore)
+        toast('Failed to save rating', 'error')
+        return
+      }
       await supabase.rpc('recompute_album_average', { p_album_id: album.id })
     },
     [album.id]
@@ -93,12 +143,25 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
   // ── Toggle interlude ────────────────────────────────────────────────────────
   const markInterlude = useCallback(
     async (trackId: string, isInterlude: boolean) => {
+      // Capture previous state for rollback via refs
+      const prevTracks = tracksRef.current
+      const prevScore = averageRef.current
+
+      // Optimistic update
       setTracks((prev) => {
         const next = prev.map((t) => (t.id === trackId ? { ...t, is_interlude: isInterlude } : t))
         setAverageScore(computeAverage(next))
         return next
       })
-      await supabase.from('tracks').update({ is_interlude: isInterlude }).eq('id', trackId)
+
+      // Persist
+      const { error } = await supabase.from('tracks').update({ is_interlude: isInterlude }).eq('id', trackId)
+      if (error) {
+        // Rollback
+        setTracks(prevTracks)
+        setAverageScore(prevScore)
+        return
+      }
       await supabase.rpc('recompute_album_average', { p_album_id: album.id })
     },
     [album.id]
@@ -115,12 +178,78 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
     await supabase.from('albums').update({ fav_l_track_id: trackId }).eq('id', album.id)
   }, [album.id])
 
+  // ── Notes ───────────────────────────────────────────────────────────────────
+  const saveNotes = useCallback(async (value: string) => {
+    const { error } = await supabase.from('albums').update({ notes: value }).eq('id', album.id)
+    if (error) {
+      toast('Failed to save note', 'error')
+    }
+  }, [album.id, toast])
+
+  const handleNotesBlur = useCallback((value: string) => {
+    setEditingNotes(false)
+    if (notesSaveTimer.current) clearTimeout(notesSaveTimer.current)
+    notesSaveTimer.current = setTimeout(() => {
+      saveNotes(value)
+    }, 500)
+  }, [saveNotes])
+
+  // ── Share album ─────────────────────────────────────────────────────────────
+  async function shareAlbum() {
+    const text = buildShareText(album, tracks, averageScore)
+    try {
+      if (!navigator.clipboard) throw new Error('Clipboard API unavailable')
+      await navigator.clipboard.writeText(text)
+      toast('Copied to clipboard!', 'success')
+    } catch {
+      toast('Could not copy to clipboard', 'error')
+    }
+  }
+
   // ── Delete album ────────────────────────────────────────────────────────────
   async function deleteAlbum() {
     setDeleting(true)
     await supabase.from('albums').delete().eq('id', album.id)
+    toast('Album deleted', 'success')
     router.push('/')
     router.refresh()
+  }
+
+  // ── Bulk rate ───────────────────────────────────────────────────────────────
+  async function bulkRate(rating: number) {
+    const unrated = tracks.filter(t => t.rating === null && !t.is_interlude)
+    if (unrated.length === 0) return
+
+    // Capture for rollback
+    const prevTracks = tracksRef.current
+    const prevScore = averageRef.current
+
+    // Optimistic update all at once
+    setTracks((prev) => {
+      const unratedIds = new Set(unrated.map(t => t.id))
+      const next = prev.map(t => unratedIds.has(t.id) ? { ...t, rating } : t)
+      setAverageScore(computeAverage(next))
+      return next
+    })
+
+    setShowBulkRater(false)
+
+    // Batch DB update — single query instead of N sequential writes
+    const { error } = await supabase
+      .from('tracks')
+      .update({ rating })
+      .in('id', unrated.map(t => t.id))
+
+    if (error) {
+      // Rollback via refs
+      setTracks(prevTracks)
+      setAverageScore(prevScore)
+      toast('Failed to apply bulk rating', 'error')
+      return
+    }
+
+    // Single RPC call to recompute average
+    await supabase.rpc('recompute_album_average', { p_album_id: album.id })
   }
 
   // ── Styles ──────────────────────────────────────────────────────────────────
@@ -132,39 +261,51 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
       <div className="sticky top-0 z-10 flex items-center justify-between px-3 pt-safe">
         <button
           onClick={() => router.back()}
-          className="mt-2 flex items-center gap-0.5 rounded-xl px-2.5 py-2 text-white/70 transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-95 active:bg-white/15"
+          disabled={deleting}
+          className="mt-2 flex items-center gap-0.5 rounded-xl px-2.5 py-2 text-white/70 transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-95 active:bg-white/15 disabled:opacity-50 disabled:pointer-events-none"
           aria-label="Go back"
         >
           <ChevronLeft size={20} />
           <span className="text-sm font-medium">Back</span>
         </button>
 
-        {/* Delete */}
-        {confirmDelete ? (
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              onClick={() => setConfirmDelete(false)}
-              className="rounded-xl px-3 py-2 text-xs text-zinc-400 transition-colors hover:text-white"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={deleteAlbum}
-              disabled={deleting}
-              className="rounded-xl bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/30 active:scale-95 disabled:opacity-50"
-            >
-              {deleting ? 'Deleting...' : 'Delete'}
-            </button>
-          </div>
-        ) : (
+        {/* Share + Delete */}
+        <div className="mt-2 flex items-center gap-1">
           <button
-            onClick={() => setConfirmDelete(true)}
-            className="mt-2 rounded-xl p-2 text-white/30 transition-all duration-150 hover:bg-white/10 hover:text-white/70 active:scale-95"
-            aria-label="Delete album"
+            onClick={shareAlbum}
+            className="rounded-xl p-2 text-white/30 transition-all duration-150 hover:bg-white/10 hover:text-white/70 active:scale-95"
+            aria-label="Share album"
           >
-            <Trash2 size={17} />
+            <Share2 size={17} />
           </button>
-        )}
+
+          {/* Delete */}
+          {confirmDelete ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="rounded-xl px-3 py-2 text-xs text-zinc-400 transition-colors hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={deleteAlbum}
+                disabled={deleting}
+                className="rounded-xl bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/30 active:scale-95 disabled:opacity-50"
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="rounded-xl p-2 text-white/30 transition-all duration-150 hover:bg-white/10 hover:text-white/70 active:scale-95"
+              aria-label="Delete album"
+            >
+              <Trash2 size={17} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="px-4 pb-32">
@@ -230,6 +371,91 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
               </span>
             )}
           </div>
+
+          {/* Sort toggle + Bulk rate */}
+          <div className="flex flex-col items-center gap-2 mt-2">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setTrackSort(trackSort === 'default' ? 'rating' : 'default')}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                  trackSort === 'rating'
+                    ? 'bg-white text-black'
+                    : 'bg-white/10 text-white/70 hover:bg-white/20'
+                }`}
+              >
+                {trackSort === 'rating' ? 'By rating' : 'Track order'}
+              </button>
+              {unratedCount > 0 && !showBulkRater && (
+                <button
+                  onClick={() => setShowBulkRater(true)}
+                  className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white/70 transition-colors hover:bg-white/20"
+                >
+                  Rate all unrated ({unratedCount})
+                </button>
+              )}
+            </div>
+            {showBulkRater && (
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  type="range"
+                  min={1}
+                  max={10}
+                  value={bulkRating}
+                  onChange={e => setBulkRating(Number(e.target.value))}
+                  className="w-32"
+                />
+                <span className="text-white font-bold w-4">{bulkRating}</span>
+                <button onClick={() => bulkRate(bulkRating)} className="rounded-full bg-white text-black px-3 py-1 text-xs font-bold">
+                  Apply
+                </button>
+                <button onClick={() => setShowBulkRater(false)} className="text-white/50 text-xs">
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Notes */}
+        <div className="mt-5 animate-slide-up" style={{ animationDelay: '140ms' }}>
+          {editingNotes ? (
+            <div className="rounded-2xl bg-black/30 px-4 py-3 backdrop-blur-sm">
+              <textarea
+                autoFocus
+                value={notes}
+                maxLength={500}
+                onChange={(e) => setNotes(e.target.value)}
+                onBlur={(e) => handleNotesBlur(e.target.value)}
+                placeholder="Add a note about this album..."
+                className="w-full resize-none bg-transparent text-sm text-white/80 placeholder-white/25 outline-none"
+                rows={3}
+              />
+              <div className="mt-1 flex items-center justify-between">
+                <span className={`text-[11px] ${notes.length >= 450 ? 'text-amber-400' : 'text-zinc-600'}`}>
+                  {notes.length}/500
+                </span>
+                <button
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    handleNotesBlur(notes)
+                  }}
+                  className="text-[11px] font-medium text-zinc-400 hover:text-white transition-colors"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setEditingNotes(true)}
+              className="group flex w-full items-start gap-2 rounded-2xl bg-black/20 px-4 py-3 text-left transition-colors hover:bg-black/30 backdrop-blur-sm"
+            >
+              <Pencil size={13} className="mt-0.5 shrink-0 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
+              <span className={`text-sm leading-snug ${notes ? 'text-white/60' : 'text-white/25'}`}>
+                {notes || 'Add a note...'}
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Track list */}
@@ -237,7 +463,7 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
           className="mt-8 rounded-2xl bg-black/30 px-4 backdrop-blur-sm animate-slide-up"
           style={{ animationDelay: '160ms' }}
         >
-          {tracks.map((track, i) => (
+          {displayTracks.map((track, i) => (
             <TrackRow
               key={track.id}
               track={track}
