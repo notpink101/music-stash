@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Ban, X } from 'lucide-react'
+import { RATING_THRESHOLDS, DEFAULT_ACCENT_COLOR } from '@/lib/constants'
 import type { Track } from '@/lib/types'
 
 function formatDuration(ms: number): string {
@@ -12,9 +13,9 @@ function formatDuration(ms: number): string {
 
 function ratingColor(r: number | null): string {
   if (r === null) return 'text-zinc-600'
-  if (r >= 8) return 'text-emerald-400'
-  if (r >= 6) return 'text-amber-400'
-  if (r >= 4) return 'text-orange-400'
+  if (r >= RATING_THRESHOLDS.GREAT) return 'text-emerald-400'
+  if (r >= RATING_THRESHOLDS.GOOD) return 'text-amber-400'
+  if (r >= RATING_THRESHOLDS.OKAY) return 'text-orange-400'
   return 'text-red-400'
 }
 
@@ -30,7 +31,7 @@ interface TrackRowProps {
   onFavL: (trackId: string | null) => void
 }
 
-export default function TrackRow({ track, accentColor = '#6366f1', index = 0, onRate, onInterlude, isFavK, isFavL, onFavK, onFavL }: TrackRowProps) {
+export default function TrackRow({ track, accentColor = DEFAULT_ACCENT_COLOR, index = 0, onRate, onInterlude, isFavK, isFavL, onFavK, onFavL }: TrackRowProps) {
   const [localRating, setLocalRating] = useState<number | null>(track.rating)
   const [isInterlude, setIsInterlude] = useState(track.is_interlude ?? false)
   const [favMenuOpen, setFavMenuOpen] = useState(false)

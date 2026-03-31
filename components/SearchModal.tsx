@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { X, Search, Loader2, Plus, Trash2 } from 'lucide-react'
+import { SEARCH_DEBOUNCE_MS } from '@/lib/constants'
 import type { SpotifyAlbumResult } from '@/lib/spotify'
 import type { Album } from '@/lib/types'
 
@@ -68,7 +69,7 @@ export default function SearchModal({ onClose, onImported }: Props) {
       } finally {
         setSearching(false)
       }
-    }, 350)
+    }, SEARCH_DEBOUNCE_MS)
   }, [query])
 
   async function handleSelect(spotifyAlbumId: string) {

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft, Trash2 } from 'lucide-react'
+import { DEFAULT_ACCENT_COLOR } from '@/lib/constants'
 import { supabase } from '@/lib/supabase'
 import TrackRow from '@/components/TrackRow'
 import type { Album, Track } from '@/lib/types'
@@ -23,7 +24,7 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
   const router = useRouter()
   const [tracks, setTracks] = useState(initialTracks)
   const [averageScore, setAverageScore] = useState(album.average_score)
-  const [accent, setAccent] = useState(album.dominant_color ?? '#6366f1')
+  const [accent, setAccent] = useState(album.dominant_color ?? DEFAULT_ACCENT_COLOR)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [favKTrackId, setFavKTrackId] = useState<string | null>(album.fav_k_track_id ?? null)
