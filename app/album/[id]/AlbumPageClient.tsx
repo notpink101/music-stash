@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft, Trash2 } from 'lucide-react'
+import { ChevronLeft, Share2, Trash2 } from 'lucide-react'
 import { DEFAULT_ACCENT_COLOR } from '@/lib/constants'
 import { supabase } from '@/lib/supabase'
 import TrackRow from '@/components/TrackRow'
@@ -21,16 +21,35 @@ function computeAverage(tracks: Track[]): number | null {
   return rated.reduce((sum, t) => sum + t.rating!, 0) / rated.length
 }
 
+function buildShareText(album: Album, tracks: Track[], averageScore: number | null): string {
+  const score = averageScore != null ? averageScore.toFixed(1) : '—'
+  const trackLines = tracks
+    .slice()
+    .sort((a, b) => a.track_number - b.track_number)
+    .map((t) => `${t.track_number}. ${t.title} — ${t.rating ?? '—'}`)
+    .join('\n')
+  return `🎵 ${album.title} — ${album.artist}\n⭐ ${score}/10\n\n${trackLines}\n\nRated on The Stash`
+}
+
 export default function AlbumPageClient({ album, initialTracks }: Props) {
   const router = useRouter()
   const { toast } = useToast()
   const [tracks, setTracks] = useState(initialTracks)
   const [averageScore, setAverageScore] = useState(album.average_score)
   const [accent, setAccent] = useState(album.dominant_color ?? DEFAULT_ACCENT_COLOR)
+  const [trackSort, setTrackSort] = useState<'default' | 'rating'>('default')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [favKTrackId, setFavKTrackId] = useState<string | null>(album.fav_k_track_id ?? null)
   const [favLTrackId, setFavLTrackId] = useState<string | null>(album.fav_l_track_id ?? null)
+
+  // ── Sorted track list ───────────────────────────────────────────────────────
+  const displayTracks = useMemo(() => {
+    if (trackSort === 'rating') {
+      return [...tracks].sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1))
+    }
+    return tracks
+  }, [tracks, trackSort])
 
   // ── Refs for rollback ───────────────────────────────────────────────────────
   const tracksRef = useRef(tracks)
@@ -151,6 +170,18 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
     await supabase.from('albums').update({ fav_l_track_id: trackId }).eq('id', album.id)
   }, [album.id])
 
+  // ── Share album ─────────────────────────────────────────────────────────────
+  async function shareAlbum() {
+    const text = buildShareText(album, tracks, averageScore)
+    try {
+      if (!navigator.clipboard) throw new Error('Clipboard API unavailable')
+      await navigator.clipboard.writeText(text)
+      toast('Copied to clipboard!', 'success')
+    } catch {
+      toast('Could not copy to clipboard', 'error')
+    }
+  }
+
   // ── Delete album ────────────────────────────────────────────────────────────
   async function deleteAlbum() {
     setDeleting(true)
@@ -177,32 +208,43 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
           <span className="text-sm font-medium">Back</span>
         </button>
 
-        {/* Delete */}
-        {confirmDelete ? (
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              onClick={() => setConfirmDelete(false)}
-              className="rounded-xl px-3 py-2 text-xs text-zinc-400 transition-colors hover:text-white"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={deleteAlbum}
-              disabled={deleting}
-              className="rounded-xl bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/30 active:scale-95 disabled:opacity-50"
-            >
-              {deleting ? 'Deleting...' : 'Delete'}
-            </button>
-          </div>
-        ) : (
+        {/* Share + Delete */}
+        <div className="mt-2 flex items-center gap-1">
           <button
-            onClick={() => setConfirmDelete(true)}
-            className="mt-2 rounded-xl p-2 text-white/30 transition-all duration-150 hover:bg-white/10 hover:text-white/70 active:scale-95"
-            aria-label="Delete album"
+            onClick={shareAlbum}
+            className="rounded-xl p-2 text-white/30 transition-all duration-150 hover:bg-white/10 hover:text-white/70 active:scale-95"
+            aria-label="Share album"
           >
-            <Trash2 size={17} />
+            <Share2 size={17} />
           </button>
-        )}
+
+          {/* Delete */}
+          {confirmDelete ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="rounded-xl px-3 py-2 text-xs text-zinc-400 transition-colors hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={deleteAlbum}
+                disabled={deleting}
+                className="rounded-xl bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/30 active:scale-95 disabled:opacity-50"
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="rounded-xl p-2 text-white/30 transition-all duration-150 hover:bg-white/10 hover:text-white/70 active:scale-95"
+              aria-label="Delete album"
+            >
+              <Trash2 size={17} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="px-4 pb-32">
@@ -268,6 +310,20 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
               </span>
             )}
           </div>
+
+          {/* Sort toggle */}
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={() => setTrackSort(trackSort === 'default' ? 'rating' : 'default')}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                trackSort === 'rating'
+                  ? 'bg-white text-black'
+                  : 'bg-white/10 text-white/70 hover:bg-white/20'
+              }`}
+            >
+              {trackSort === 'rating' ? 'By rating' : 'Track order'}
+            </button>
+          </div>
         </div>
 
         {/* Track list */}
@@ -275,7 +331,7 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
           className="mt-8 rounded-2xl bg-black/30 px-4 backdrop-blur-sm animate-slide-up"
           style={{ animationDelay: '160ms' }}
         >
-          {tracks.map((track, i) => (
+          {displayTracks.map((track, i) => (
             <TrackRow
               key={track.id}
               track={track}
