@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { Search, Disc3, SlidersHorizontal, X, Plus } from 'lucide-react'
 import AlbumCard from './AlbumCard'
 import SearchModal from './SearchModal'
+import { supabase } from '@/lib/supabase'
 import type { Album } from '@/lib/types'
 
 type SortKey = 'newest' | 'top' | 'alpha'
@@ -27,6 +28,36 @@ export default function StashFeed({ initialAlbums }: Props) {
   useEffect(() => {
     const saved = localStorage.getItem('stash-sort') as SortKey | null
     if (saved) setSort(saved)
+  }, [])
+
+  // Subscribe to realtime albums updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('albums-feed')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'albums' },
+        (payload) => {
+          setAlbums((prev) => [payload.new as Album, ...prev.filter(a => a.id !== (payload.new as Album).id)])
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'albums' },
+        (payload) => {
+          setAlbums((prev) => prev.filter(a => a.id !== (payload.old as Album).id))
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'albums' },
+        (payload) => {
+          setAlbums((prev) => prev.map(a => a.id === (payload.new as Album).id ? { ...a, ...(payload.new as Album) } : a))
+        }
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
   }, [])
 
   function handleSetSort(key: SortKey) {
