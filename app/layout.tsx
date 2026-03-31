@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { Geist } from 'next/font/google'
 import './globals.css'
+import { ToastProvider } from '@/components/Toast'
 
 const geist = Geist({ subsets: ['latin'], variable: '--font-geist' })
 
@@ -26,7 +27,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={geist.variable}>
-      <body className="bg-zinc-950 text-white antialiased">{children}</body>
+      <body className="bg-zinc-950 text-white antialiased">
+          <ToastProvider>{children}</ToastProvider>
+        </body>
     </html>
   )
 }

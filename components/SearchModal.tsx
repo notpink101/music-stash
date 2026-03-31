@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { X, Search, Loader2, Plus, Trash2 } from 'lucide-react'
 import { SEARCH_DEBOUNCE_MS } from '@/lib/constants'
+import { useToast } from '@/components/Toast'
 import type { SpotifyAlbumResult } from '@/lib/spotify'
 import type { Album } from '@/lib/types'
 
@@ -17,6 +18,7 @@ type Mode = 'spotify' | 'manual'
 
 export default function SearchModal({ onClose, onImported }: Props) {
   const router = useRouter()
+  const { toast } = useToast()
   const [mode, setMode] = useState<Mode>('spotify')
 
   // ── Spotify search state ───────────────────────────────────────────────────
@@ -85,6 +87,7 @@ export default function SearchModal({ onClose, onImported }: Props) {
       const data = await res.json()
       if (!res.ok) {
         setImportError(data?.error ?? 'Failed to import album')
+        toast('Import failed', 'error')
         return
       }
       const album: Album = data
@@ -120,6 +123,7 @@ export default function SearchModal({ onClose, onImported }: Props) {
       const data = await res.json()
       if (!res.ok) {
         setImportError(data?.error ?? 'Failed to import album')
+        toast('Import failed', 'error')
         return
       }
       const album: Album = data

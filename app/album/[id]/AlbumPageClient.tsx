@@ -7,6 +7,7 @@ import { ChevronLeft, Trash2 } from 'lucide-react'
 import { DEFAULT_ACCENT_COLOR } from '@/lib/constants'
 import { supabase } from '@/lib/supabase'
 import TrackRow from '@/components/TrackRow'
+import { useToast } from '@/components/Toast'
 import type { Album, Track } from '@/lib/types'
 
 interface Props {
@@ -22,6 +23,7 @@ function computeAverage(tracks: Track[]): number | null {
 
 export default function AlbumPageClient({ album, initialTracks }: Props) {
   const router = useRouter()
+  const { toast } = useToast()
   const [tracks, setTracks] = useState(initialTracks)
   const [averageScore, setAverageScore] = useState(album.average_score)
   const [accent, setAccent] = useState(album.dominant_color ?? DEFAULT_ACCENT_COLOR)
@@ -103,6 +105,7 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
         // Rollback
         setTracks(prevTracks)
         setAverageScore(prevScore)
+        toast('Failed to save rating', 'error')
         return
       }
       await supabase.rpc('recompute_album_average', { p_album_id: album.id })
@@ -152,6 +155,7 @@ export default function AlbumPageClient({ album, initialTracks }: Props) {
   async function deleteAlbum() {
     setDeleting(true)
     await supabase.from('albums').delete().eq('id', album.id)
+    toast('Album deleted', 'success')
     router.push('/')
     router.refresh()
   }
